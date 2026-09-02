@@ -1,0 +1,19 @@
+# DEV - the shared development environment, deployed from the `develop` branch.
+#
+#     SPRING_PROFILES_ACTIVE=deployed,dev
+#
+# Holds synthetic data only; production data is never copied here (Development Environment
+# Configuration, Section 43). It is the one deployed environment tuned for reading diagnostics
+# rather than for economy.
+
+logging:
+  level:
+    # The environment where a developer is usually chasing something. INFO elsewhere.
+    in.gov.ipie: DEBUG
+
+management:
+  tracing:
+    sampling:
+      # Every request traced. Volume here is a handful of developers, so the cost is nothing and a
+      # half-sampled trace is worse than useless when reproducing a defect.
+      probability: ${IPIE_TRACING_SAMPLING_PROBABILITY:1.0}
