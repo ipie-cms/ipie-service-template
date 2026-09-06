@@ -1,0 +1,30 @@
+# PPE - pre-production, deployed from the `preprod` branch.
+#
+#     SPRING_PROFILES_ACTIVE=deployed,preprod
+#
+# PPE EXISTS TO BE INDISTINGUISHABLE FROM PRODUCTION. Its purpose is to surface environment-specific
+# defects before go-live, and it can only do that while it is configured the same way - so this file
+# and application-prod.yml should stay identical in every control. Every line that differs is a
+# class of defect PPE can no longer catch.
+#
+# Two differences are deliberate and are the only ones that should ever be here:
+#   - it points at pre-production infrastructure, which is supplied externally rather than in this
+#     file, so nothing about it appears below;
+#   - trace sampling matches Production, because a difference in observability changes what a
+#     performance rehearsal measures.
+#
+# Anything else added here needs a recorded reason - the exception register in the Development
+# Environment Configuration document, Appendix E, is where it goes.
+
+management:
+  tracing:
+    sampling:
+      probability: ${IPIE_TRACING_SAMPLING_PROBABILITY:0.1}
+
+springdoc:
+  # Disabled, as in Production. An endpoint reachable in PPE and absent in PROD is a difference that
+  # only shows up after go-live.
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

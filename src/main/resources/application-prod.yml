@@ -1,0 +1,35 @@
+# PROD - production, deployed from the `master` branch.
+#
+#     SPRING_PROFILES_ACTIVE=deployed,prod
+#
+# The shared hardening for every deployed environment is in application-deployed.yml, which this
+# profile assumes is active alongside it. This file carries only what is true of Production and of
+# nowhere else, so that a release review can read it and see the whole difference.
+#
+# Keep this file and application-preprod.yml identical in every control. PPE exists to be
+# indistinguishable from here; a divergence means PPE stops proving anything about go-live.
+#
+# Still open, and not something a Spring profile can fix (master standards doc, Section 12): the
+# audit trail is a logging stub rather than queryable compliance evidence, and the CI/CD pipeline is
+# not production-ready.
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only what monitoring needs. Anything else - env, beans, mappings, configprops - describes
+        # the running system's internals to whoever can reach the port.
+        include: health,info,prometheus
+  tracing:
+    sampling:
+      # Real traffic volume makes full sampling expensive. Raise it deliberately and temporarily
+      # when investigating, rather than leaving it high.
+      probability: ${IPIE_TRACING_SAMPLING_PROBABILITY:0.1}
+
+springdoc:
+  # The API contract is published to integrating teams through the documentation process, not by
+  # leaving a live schema endpoint exposed on the production estate.
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

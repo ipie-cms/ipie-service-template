@@ -1,0 +1,11 @@
+# SIT / TEST - system integration testing, deployed from the `test` branch.
+#
+#     SPRING_PROFILES_ACTIVE=deployed,sit
+#
+# Synthetic data. This is where automated suites run against a full stack, so sampling is high
+# enough to investigate a failing run without keeping every trace of every retry.
+
+management:
+  tracing:
+    sampling:
+      probability: ${IPIE_TRACING_SAMPLING_PROBABILITY:0.5}

@@ -1,0 +1,14 @@
+# UAT - user acceptance testing, deployed from the `uat` branch.
+#
+#     SPRING_PROFILES_ACTIVE=deployed,uat
+#
+# Masked production-like data, exercised by business users rather than by automated suites. The API
+# documentation stays reachable here on purpose: testers and integrating teams use it, and this is
+# the last environment where that is true.
+
+management:
+  tracing:
+    sampling:
+      # Enough to follow a reported problem back through the services without asking the user to
+      # reproduce it.
+      probability: ${IPIE_TRACING_SAMPLING_PROBABILITY:0.3}

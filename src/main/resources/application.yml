@@ -1,0 +1,197 @@
+# This service is secured by default (see ipie.security below and common-security). No
+# spring.security.oauth2.resourceserver.jwt.issuer-uri/jwk-set-uri is set here on purpose: real
+# environments MUST supply one (pointing at Keycloak, e.g. https://keycloak.example.com/realms/ipie)
+# via SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI - startup fails loudly without it
+# rather than silently accepting unauthenticated traffic (master standards doc, 14: "Fail startup
+# when mandatory secure configuration is missing"). See application-local.yml for local dev only.
+spring:
+  application:
+    name: ipie-service-template
+
+  datasource:
+    # Was ipie/ipie (the Dockerized postgres service's creds, see docker-compose.yml). Pointed at
+    # local Postgres instead, using its default postgres/postgres superuser account.
+    # url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ipie_service_template}
+    # username: ${SPRING_DATASOURCE_USERNAME:ipie}
+    # password: ${SPRING_DATASOURCE_PASSWORD:ipie}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ipie_service_template}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema - Hibernate only ever validates it matches (master standards doc,
+      # 7.1: "Do not use Hibernate ddl-auto=update in controlled environments").
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Both of these are Flyway's own defaults. They are written out anyway because this is the
+    # template every new microservice is copied from, and because the rule they enforce - master
+    # standards doc, Database Migration Scripts - has already been broken by accident here: commit
+    # "Point the plan references at its new name" renamed a document in comment text and, doing so,
+    # edited six already-committed migrations across ipie-user-service, ipie-iam-service and
+    # ipie-communication-service. Not one line of SQL changed. Flyway checksums the whole file,
+    # comments included, so a comment-only edit is as fatal as a schema one. Nothing broke locally
+    # because those databases had been rebuilt since; an environment that had already applied those
+    # versions would have refused to start with a checksum mismatch.
+    #
+    # Leaving a load-bearing rule to a default nobody has written down is what made that invisible.
+    # A migration that is already applied somewhere is immutable - to change its effect, add a new
+    # version.
+    validate-on-migrate: true
+    # A destructive command with no legitimate use in any environment this service runs in. It is
+    # disabled by default in Flyway 10+, but stated here so that turning it on has to be a visible,
+    # deliberate edit to this file rather than an inherited default that could change under us.
+    clean-disabled: true
+
+  servlet:
+    multipart:
+      # Backstop only, not the only control (master standards doc, file-upload rules, section 2) -
+      # a gateway/reverse-proxy in front of this service should reject oversized requests earlier.
+      # Kept comfortably above ipie.documents.max-file-size-bytes below so a too-large file reaches
+      # DocumentService's own check (a clean 400 via FileTooLargeException) rather than being cut
+      # off mid-transfer by the servlet container first.
+      max-file-size: 30MB
+      max-request-size: 30MB
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # "prometheus" here is unrelated to and does not affect "metrics"/tracing below - it just
+        # exposes the /actuator/prometheus scrape endpoint that common-observability's
+        # micrometer-registry-prometheus dependency wires in automatically (master standards doc,
+        # 5.6). See docker-compose.yml's prometheus service for the scrape config that reads it.
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    # Both spring-kafka and spring-boot-starter-amqp are always on the classpath (this service can
+    # be configured for either broker - see EventPublisherConfig), so Spring Boot auto-registers
+    # health indicators for BOTH regardless of which one is actually active. Whichever broker
+    # ISN'T configured has no spring.kafka.bootstrap-servers/spring.rabbitmq.host set, so its
+    # indicator checks Spring Boot's own default target (localhost:9092/localhost:5672) - nothing
+    # is listening there inside the container, so it always reports DOWN and drags overall
+    # /actuator/health DOWN even when the service and its actually-configured broker are fine.
+    # Disabled here; re-enable only the one matching whichever broker this deployment actually
+    # uses if you want real broker-connectivity health monitoring.
+    kafka:
+      enabled: false
+    rabbit:
+      enabled: false
+    # spring-boot-starter-data-redis (via common-cache) is always on the classpath too, so Spring
+    # Boot auto-registers a Redis health indicator the same way it does for Kafka/RabbitMQ above -
+    # purely from classpath presence, not from whether spring.data.redis.host is actually set.
+    # Caching has a safe "do nothing" fallback (IpieCacheAutoConfiguration's no-op CacheManager),
+    # so an unreachable/unconfigured Redis should never drag overall service health down; disabled
+    # here for the same reason as kafka/rabbit above.
+    redis:
+      enabled: false
+  tracing:
+    sampling:
+      # 100% here so the reference template's traces are always visible; real services should
+      # sample far lower (e.g. 0.1) once traffic volume makes full sampling expensive.
+      probability: ${IPIE_TRACING_SAMPLING_PROBABILITY:1.0}
+  otlp:
+    tracing:
+      # Jaeger's all-in-one image exposes an OTLP/HTTP receiver on 4318 (see docker-compose.yml's
+      # jaeger service); set to http://jaeger:4318/v1/traces inside Compose via IPIE_OTLP_ENDPOINT.
+      endpoint: ${IPIE_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+ipie:
+  openapi:
+    # Title comes from spring.application.name; only this sentence is the service's
+    # own. It used to be a copied class, which is how every service ended up serving
+    # the template's description as its public API summary.
+    description: "template service API"
+  security:
+    enabled: true
+    permissions-claim: permissions
+    # Empty by default (no cross-origin access); set via IPIE_CORS_ALLOWED_ORIGINS for a browser
+    # frontend, e.g. http://localhost:5173 for the ipie-web local dev server.
+    cors-allowed-origins: ${IPIE_CORS_ALLOWED_ORIGINS:}
+  events:
+    kafka:
+      # spring.kafka.bootstrap-servers is deliberately left unset here - EventPublisherConfig
+      # only activates KafkaEventPublisher when it's actually provided (e.g. via
+      # SPRING_KAFKA_BOOTSTRAP_SERVERS in docker-compose.yml); otherwise events fall back to the
+      # logging reference implementation, or to RabbitMQ below if that's configured instead.
+      topic: ${IPIE_EVENTS_KAFKA_TOPIC:ipie-service-template.events}
+    rabbitmq:
+      # spring.rabbitmq.host is deliberately left unset here too - only activates when Kafka
+      # isn't configured (see EventPublisherConfig's precedence: Kafka > RabbitMQ > logging), so
+      # the two never activate at the same time. Standby broker in case Kafka doesn't get
+      # organizational clearance - set SPRING_RABBITMQ_HOST to switch to it, no code change.
+      exchange: ${IPIE_EVENTS_RABBITMQ_EXCHANGE:ipie-service-template.events}
+      queue: ${IPIE_EVENTS_RABBITMQ_QUEUE:ipie-service-template.events.user-event-log}
+  cache:
+    # spring.data.redis.host is deliberately left unset here too, same reasoning as
+    # spring.kafka.bootstrap-servers above - IpieCacheAutoConfiguration only activates the
+    # Redis-backed CacheManager when it's actually provided (e.g. via SPRING_DATA_REDIS_HOST in
+    # docker-compose.yml); otherwise @Cacheable methods run uncached via the no-op fallback.
+    # default-ttl/ttls below are shown at their Java-level defaults for visibility - override
+    # per-cache-name via ipie.cache.ttls.<cache-name> (e.g. IPIE_CACHE_TTLS_USER-LOOKUP=PT1M).
+    default-ttl: ${IPIE_CACHE_DEFAULT_TTL:PT10M}
+  storage:
+    s3:
+      # Unlike the event broker, FileStorage has no safe "do nothing" fallback - a service that
+      # accepts uploads needs a real object store, so this is configured with working local-dev
+      # (MinIO) defaults rather than left unset (contrast with ipie.events.kafka above). Point
+      # this at real AWS S3 in production by overriding endpoint/access-key/secret-key/region -
+      # leaving access-key unset falls back to the AWS SDK's default credential chain (IAM role),
+      # the correct behaviour for a real deployment - see S3StorageConfig.
+      endpoint: ${IPIE_STORAGE_S3_ENDPOINT:http://minio:9000}
+      # The endpoint embedded in presigned download URLs, as opposed to "endpoint" above (what
+      # this service itself uses to reach the store) - this service reaches MinIO at the
+      # docker-network hostname "minio", but a presigned URL is handed back to an external caller
+      # (Postman, a browser) that can't resolve that hostname at all; it needs the host-mapped
+      # localhost:9000 instead. In a real AWS deployment these are typically the same address, so
+      # this only needs setting when the two genuinely differ - see S3StorageProperties.
+      public-endpoint: ${IPIE_STORAGE_S3_PUBLIC_ENDPOINT:http://localhost:9000}
+      region: ${IPIE_STORAGE_S3_REGION:us-east-1}
+      access-key: ${IPIE_STORAGE_S3_ACCESS_KEY:minioadmin}
+      secret-key: ${IPIE_STORAGE_S3_SECRET_KEY:minioadmin}
+      bucket: ${IPIE_STORAGE_S3_BUCKET:ipie-documents}
+      # MinIO needs path-style bucket addressing (http://host/bucket/key); real AWS S3 uses
+      # virtual-hosted-style (https://bucket.s3.amazonaws.com/key) - set this to false when
+      # IPIE_STORAGE_S3_ENDPOINT is unset/pointed at real AWS.
+      path-style-access: ${IPIE_STORAGE_S3_PATH_STYLE:true}
+      sse:
+        enabled: ${IPIE_STORAGE_S3_SSE_ENABLED:false}
+        # Unset here - MinIO's local dev setup doesn't run a real KMS. Set to a real KMS key ARN
+        # in production alongside sse.enabled=true for SSE-KMS; leaving this blank with
+        # sse.enabled=true falls back to SSE-S3 (AES256) instead - see S3FileStorage.
+        kms-key-id: ${IPIE_STORAGE_S3_SSE_KMS_KEY_ID:}
+  scanning:
+    clamav:
+      # Unset by default - VirusScanConfig fails closed (rejects every upload) rather than
+      # silently skipping scanning when this isn't configured (master standards doc, file-upload
+      # rules, section 3). docker-compose.yml sets this via IPIE_SCANNING_CLAMAV_HOST so local dev
+      # gets a real scanner by default; a bare `java -jar` with nothing configured does not.
+      host: ${IPIE_SCANNING_CLAMAV_HOST:}
+      port: ${IPIE_SCANNING_CLAMAV_PORT:3310}
+      timeout-ms: ${IPIE_SCANNING_CLAMAV_TIMEOUT_MS:10000}
+  documents:
+    # Per-file size limit (master standards doc, file-upload rules, section 2) - 25MB default,
+    # matching "25 MB for documents" from that section. Override per deployment if a specific doc
+    # type genuinely needs more (e.g. large scanned claim bundles).
+    max-file-size-bytes: ${IPIE_DOCUMENTS_MAX_FILE_SIZE_BYTES:26214400}
